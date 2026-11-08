@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bdh-app-snow-report"
+version = "1.0.0"
+description = "Black Diamond Hub app: Sun Peaks snow and weather report"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "bdh-sdk>=0.1,<1",
+    "beautifulsoup4",
+    "requests",
+]
+
+[project.urls]
+Source = "https://github.com/blackdiamondlodge/bdh-app-snow-report"
+
+[project.entry-points."blackdiamondhub.plugins"]
+snow_report = "snow_report.plugin:spec"
+
+[tool.setuptools.packages.find]
+include = ["snow_report", "snow_report.*"]
+
+[tool.setuptools.package-data]
+snow_report = [
+    "templates/**/*",
+    "static/**/*",
+    "migrations/*.py",
+    "tests/*.html",
+]
