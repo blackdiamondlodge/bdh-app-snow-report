@@ -7,11 +7,11 @@ spec = PluginSpec(
     status="snow_report.homepage.status",
     tiles=(
         Tile(
-            title="Snow Report",
+            title="Mountain Conditions",
             url_name="snow_report",
             icon="snow_report/hub/icon.svg",
             section="mountain",
-            subtitle="Fresh snow & conditions",
+            subtitle="Snow, weather & forecast",
             order=10,
         ),
     ),

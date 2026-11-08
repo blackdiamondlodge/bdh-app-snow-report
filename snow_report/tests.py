@@ -1,296 +1,274 @@
+import datetime
 import os
 from unittest.mock import patch
-import requests
-from django.test import TestCase, tag
+
+from django.core.cache import cache
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.test import TestCase, tag
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from snow_report.views import parse_weather_html, sanitize_number, convert_celsius_to_fahrenheit, convert_cm_to_inches, convert_meters_to_feet, convert_kph_to_mph
+from selenium.webdriver.support.ui import WebDriverWait
+
+from snow_report.forecast import parse_forecast
+from snow_report.resort import SNOW_REPORT_URL, parse_resort_html, sanitize_number
+from snow_report.views import build_context
+
+FIXTURES = os.path.join(os.path.dirname(__file__), "tests")
+
+
+def fixture(name):
+    with open(os.path.join(FIXTURES, name), encoding="utf-8") as f:
+        return parse_resort_html(f.read())
+
+
+def open_meteo_payload(days=5):
+    def daily(high, low, snow, code):
+        times = [(datetime.date(2026, 1, 10) + datetime.timedelta(days=i)).isoformat() for i in range(days)]
+        return {"daily": {
+            "time": times,
+            "weather_code": [code] * days,
+            "temperature_2m_max": [high] * days,
+            "temperature_2m_min": [low] * days,
+            "snowfall_sum": [snow] * days,
+            "precipitation_probability_max": [40] * days,
+            "uv_index_max": [2.4] * days,
+            "sunrise": [f"{t}T07:45" for t in times],
+            "sunset": [f"{t}T16:40" for t in times],
+        }}
+    return [daily(1.0, -6.0, 0.0, 3), daily(-7.0, -12.0, 8.4, 73)]
+
+
+def fake_today(year, month, day):
+    class FakeDate(datetime.date):
+        @classmethod
+        def today(cls):
+            return datetime.date(year, month, day)
+    return FakeDate
 
 
 class SanitizeNumberTests(TestCase):
-    """Tests for sanitize_number and conversion functions handling malformed input."""
-
     def test_double_dash_negative(self):
-        """'--7' from the website should be treated as -7."""
-        self.assertEqual(sanitize_number('--7'), -7.0)
+        self.assertEqual(sanitize_number("--7"), -7.0)
 
-    def test_normal_negative(self):
-        self.assertEqual(sanitize_number('-7'), -7.0)
+    def test_thousands_separator(self):
+        self.assertEqual(sanitize_number("2,080"), 2080.0)
 
-    def test_normal_positive(self):
-        self.assertEqual(sanitize_number('15'), 15.0)
-
-    def test_empty_string(self):
-        self.assertIsNone(sanitize_number(''))
-
-    def test_none(self):
-        self.assertIsNone(sanitize_number(None))
-
-    def test_na_string(self):
-        self.assertIsNone(sanitize_number('N/A'))
-
-    def test_dash_only(self):
-        self.assertIsNone(sanitize_number('-'))
-
-    def test_double_dash_only(self):
-        self.assertIsNone(sanitize_number('--'))
-
-    def test_decimal(self):
-        self.assertEqual(sanitize_number('3.5'), 3.5)
-
-    def test_celsius_to_fahrenheit_double_dash(self):
-        """'--7' should convert as -7°C → 19°F."""
-        self.assertEqual(convert_celsius_to_fahrenheit('--7'), 19)
-
-    def test_celsius_to_fahrenheit_normal(self):
-        self.assertEqual(convert_celsius_to_fahrenheit('-7'), 19)
-
-    def test_celsius_to_fahrenheit_none(self):
-        self.assertIsNone(convert_celsius_to_fahrenheit(None))
-
-    def test_celsius_to_fahrenheit_na(self):
-        self.assertIsNone(convert_celsius_to_fahrenheit('N/A'))
-
-    def test_cm_to_inches_double_dash(self):
-        self.assertEqual(convert_cm_to_inches('--10'), -4)
-
-    def test_meters_to_feet_normal(self):
-        self.assertEqual(convert_meters_to_feet('1000'), 3281)
-
-    def test_kph_to_mph_normal(self):
-        self.assertEqual(convert_kph_to_mph('100'), 62)
-from tests.selenium_helpers import get_chrome_options
-
-class LiveParseWeatherHtmlTests(TestCase):
-    def parse_weather_html_live_data_and_test(self, units=""):
-        url = "https://www.sunpeaksresort.com/ski-ride/weather-conditions-cams/weather-snow-report"
-        response = requests.get(url)
-        html_content = response.content
-
-        weather_data_metric = parse_weather_html(html_content, units)
-        self.assertIsNotNone(weather_data_metric)
-
-        # Ensure today_icon is mapped correctly (may be empty when
-        # Sun Peaks removes the current-condition section seasonally)
-        today_icon = weather_data_metric["today_icon"]
-        if today_icon:
-            self.assertNotEqual(today_icon, "fas fa-question-circle", f"today_icon is set to unknown value {today_icon}")
-
-        # today_description may be empty when the current-condition
-        # section is absent from the page (e.g. off-season)
-        today_description = weather_data_metric["today_description"]
-
-        ##########################
-        ## Temperatures
-        ##########################
-        temperatures = weather_data_metric["temperatures"]
-        self.assertEqual(len(temperatures), 4, f"Expected 4 temperature readings but found {len(temperatures)}")
-
-        for temp in temperatures:
-            self.assertNotEqual(temp["location"], "", f"Temperature location for {temp['location']} is empty")
-            self.assertNotEqual(temp["elevation"], "", f"Temperature elevation for {temp['location']} is empty")
-
-            try:
-                temp_value = int(temp["elevation"])
-                self.assertGreaterEqual(temp_value, 1000, f"Elevation of {temp['elevation']} for {temp['location']} is less than 1000")
-                self.assertLessEqual(temp_value, 10000, f"Elevation of {temp['elevation']} for {temp['location']} is greater than 10000")
-            except ValueError:
-                self.fail(f"Elevation value for {temp['location']} is not a valid integer: {temp['elevation']}")
-
-        expected_unit = "ft" if units == "imperial" else "m"
-        for temp in temperatures:
-            self.assertEqual(temp["elevation_unit"], expected_unit, f"Elevation unit for {temp['location']} is {temp['elevation_unit']} - expected: {expected_unit}")
-
-        for temp in temperatures:
-            self.assertNotEqual(temp["value"], "", f"Temperature value for {temp['location']} is empty")
-
-            try:
-                temp_value = int(temp["value"])
-                self.assertGreaterEqual(temp_value, -50, f"Temperature of {temp['value']} for {temp['location']} is less than -50")
-                self.assertLessEqual(temp_value, 110, f"Temperature of {temp['value']} for {temp['location']} is greater than 110")
-            except ValueError:
-                self.fail(f"Temperature value for {temp['location']} is not a valid integer: {temp['value']}")
-
-        expected_unit = "°F" if units == "imperial" else "°C"
-        for temp in temperatures:
-            self.assertEqual(temp["unit"], expected_unit, f"Temperature unit for {temp['location']} is {temp['unit']} - expected: {expected_unit}")
-
-        ##########################
-        ## Snow Conditions
-        ## (may be empty off-season when Sun Peaks removes the
-        ## snow-conditions section from the page)
-        ##########################
-        snow_conditions = weather_data_metric["snow_conditions"]
-        if len(snow_conditions) > 0:
-            self.assertEqual(len(snow_conditions), 4, f"Expected 4 snow conditions but found: {len(snow_conditions)}")
-
-            for snow in snow_conditions:
-                self.assertNotEqual(snow["period"], "", f"Snow condition period for {snow['period']} is empty")
-                self.assertNotEqual(snow["value"], "", f"Snow condition value for {snow['period']} is empty")
-
-            expected_unit = "in" if units == "imperial" else "cm"
-            for snow in snow_conditions:
-                self.assertEqual(snow["unit"], expected_unit, f"Snow condition unit for {snow['period']} is {snow['unit']} - expected: {expected_unit}")
-
-        ##########################
-        ## Wind Speeds
-        ## (may be empty off-season)
-        ##########################
-        wind_speeds = weather_data_metric["wind_speeds"]
-        if len(wind_speeds) > 0:
-            self.assertEqual(len(wind_speeds), 3, f"Expected 3 wind speeds but found {len(wind_speeds)}")
-
-            for wind in wind_speeds:
-                self.assertNotEqual(wind["location"], "", f"Wind speed location for {wind['location']} is empty")
-                self.assertNotEqual(wind["elevation"], "", f"Wind speed elevation for {wind['location']} is empty")
-
-                try:
-                    temp_value = int(wind["elevation"])
-                    self.assertGreaterEqual(temp_value, 1000, f"Elevation of {wind['elevation']} for {wind['location']} is less than 1000")
-                    self.assertLessEqual(temp_value, 10000, f"Elevation of {wind['elevation']} for {wind['location']} is greater than 10000")
-                except ValueError:
-                    self.fail(f"Elevation value for {wind['location']} is not a valid integer: {wind['elevation']}")
-
-            for wind in wind_speeds:
-                self.assertNotEqual(wind["speed_direction"], "", f"Wind speed direction for {wind['location']} is empty")
-                self.assertNotEqual(wind["speed_average"], "", f"Wind speed average for {wind['location']} is empty")
-
-                try:
-                    temp_value = int(wind["speed_average"])
-                    self.assertGreaterEqual(temp_value, 0, f"Wind speed of {wind['speed_average']} for {wind['location']} is less than 0")
-                    self.assertLessEqual(temp_value, 150, f"Wind speed of {wind['speed_average']} for {wind['location']} is greater than 150")
-                except ValueError:
-                    self.fail(f"Wind speed value for {wind['location']} is not a valid integer: {wind['speed_average']}")
-
-            expected_unit = "mph" if units == "imperial" else "kph"
-            for wind in wind_speeds:
-                self.assertEqual(wind["speed_unit"], expected_unit, f"Wind speed unit for {wind['location']} is {wind['speed_unit']} - expected: {expected_unit}")
-
-        ##########################
-        ## Forecast
-        ## (may be empty off-season)
-        ##########################
-        forecast = weather_data_metric["forecast"]
-        if len(forecast) > 0:
-            self.assertEqual(len(forecast), 6, f"Expected 6 forecast items but found {len(forecast)}")
-
-            for day in forecast:
-                self.assertNotEqual(day["day_name"], "", f"Forecast day name for {day['day_name']} is empty")
-                self.assertTrue(day["day_name"].startswith(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")), f"Forecast day name for {day['day_name']} is not a valid day of the week")
-                self.assertNotEqual(day["icon"], "", f"Forecast icon for {day['day_name']} is empty")
-                self.assertNotEqual(day["icon"], "fas fa-question-circle", f"Forecast icon for {day['day_name']} is set to an unknown icon (check mapping)")
-                self.assertNotEqual(day["description"], "", f"Forecast description for {day['day_name']} is empty")
-
-            expected_unit = "°F" if units == "imperial" else "°C"
-            for day in forecast:
-                self.assertEqual(day["temp_unit"], expected_unit, f"Forecast temp unit for {day['day_name']} is {day['temp_unit']} - expected: {expected_unit}")
-
-    def test_parse_weather_html_live_data_imperial(self):
-        self.parse_weather_html_live_data_and_test("imperial")
-
-    def test_parse_weather_html_live_data_metric(self):
-        self.parse_weather_html_live_data_and_test("metric")
-
-    def test_parse_weather_html_live_data_empty(self):
-        self.parse_weather_html_live_data_and_test("")
-
-    def test_parse_weather_html_live_data_invalid_unit(self):
-        self.parse_weather_html_live_data_and_test("invalid_unit")
-
-                    
-class OfflineParseWeatherHtmlTests(TestCase):
-    def test_parse_weather_html_bad_data(self):
-        # Load the sample bad data HTML file
-        file_path = os.path.join(os.path.dirname(__file__), 'tests', 'weather_bad_data.html')
-        with open(file_path, 'r', encoding='utf-8') as file:
-            html_content = file.read()
-
-        weather_data_metric = parse_weather_html(html_content, "metric")        
-        #the 24hr value for snow_conditions should be empty
-        #loop through the snow_conditions list and find where period == "24 hr"
-        found = False
-        for snow in weather_data_metric["snow_conditions"]:
-          print(snow)
-          if snow["period"] == "24 Hr":
-              self.assertEqual(snow["value"], "N/A", f"24 hr snow condition should be empty but found: {snow['value']}")
-              found = True
-              break
-              
-        self.assertTrue(found, "Did not find 24 hr snow condition in the list")
-
-    def test_parse_weather_html_ignores_air_quality(self):
-        """Ensure the parser only returns temperature entries and ignores
-        the air-quality ul.list-temps section added to the page."""
-        file_path = os.path.join(os.path.dirname(__file__), 'tests', 'weather_current.html')
-        with open(file_path, 'r', encoding='utf-8') as file:
-            html_content = file.read()
-
-        weather_data = parse_weather_html(html_content, "metric")
-        self.assertIsNotNone(weather_data)
-
-        temperatures = weather_data["temperatures"]
-        self.assertEqual(len(temperatures), 4,
-                         f"Expected 4 temperature entries (air quality should be excluded), got {len(temperatures)}")
-
-        expected_locations = {"Top of the World", "Mid-mountain", "Top of Morrisey", "Valley"}
-        actual_locations = {t["location"] for t in temperatures}
-        self.assertEqual(actual_locations, expected_locations,
-                         f"Unexpected locations: {actual_locations}")
-
-        # Air quality stations should NOT appear in temperatures
-        for temp in temperatures:
-            self.assertNotIn("AQHI", str(temp),
-                             f"Air quality data leaked into temperatures: {temp}")
+    def test_not_available(self):
+        self.assertIsNone(sanitize_number("N/A"))
+        self.assertIsNone(sanitize_number(""))
+        self.assertIsNone(sanitize_number("-"))
 
 
-@tag('selenium')
+class WinterParseTests(TestCase):
+    """weather_bad_data.html is an in-season capture (Feb 27)."""
+
+    def setUp(self):
+        self.data = fixture("weather_bad_data.html")
+
+    def test_narrative_and_icon(self):
+        self.assertTrue(self.data["narrative"].startswith("Cloudy with sunny breaks"))
+        self.assertEqual(self.data["icon"], "fas fa-cloud-sun")
+        self.assertEqual(self.data["updated"], "Updated February 27th at 6:43pm")
+
+    def test_new_snow_keeps_missing_values_as_none(self):
+        self.assertEqual(
+            [(s["period"], s["cm"]) for s in self.data["new_snow"]],
+            [("New Snow", 0.0), ("24 Hr", None), ("48 Hr", 0.0), ("7 Days", 24.0)],
+        )
+
+    def test_snow_base(self):
+        self.assertEqual([(b["name"], b["cm"]) for b in self.data["base"]],
+                         [("Mid Mountain", 158.0), ("Alpine", 172.0)])
+
+    def test_temperatures(self):
+        self.assertEqual([(t["name"], t["elevation_m"], t["c"]) for t in self.data["temperatures"]], [
+            ("Top of the World", 2080.0, -2.0), ("Mid-mountain", 1855.0, 0.0),
+            ("Top of Morrisey", 1675.0, 0.0), ("Valley", 1255.0, 3.0),
+        ])
+
+
+class OffSeasonParseTests(TestCase):
+    """weather_current.html is an off-season capture: no snow, narrative or forecast."""
+
+    def setUp(self):
+        self.data = fixture("weather_current.html")
+
+    def test_no_snow_sections(self):
+        self.assertIsNone(self.data["narrative"])
+        self.assertEqual(self.data["new_snow"], [])
+        self.assertEqual(self.data["base"], [])
+
+    def test_air_quality_kept_out_of_temperatures(self):
+        self.assertEqual({t["name"] for t in self.data["temperatures"]},
+                         {"Top of the World", "Mid-mountain", "Top of Morrisey", "Valley"})
+        self.assertEqual([(a["name"], a["aqhi"]) for a in self.data["air_quality"]], [
+            ("Top of Sunburst", 1.0), ("Top of Sundance", 1.0), ("Top of Morrisey", 1.0), ("Valley", 1.0),
+        ])
+
+    def test_wind(self):
+        self.assertEqual(self.data["wind"][0],
+                         {"name": "Top of the World", "elevation_m": 2080.0, "direction": "SSE", "kph": 16.0})
+        self.assertEqual(len(self.data["wind"]), 3)
+
+
+class LiveResortPageTests(TestCase):
+    """Catches Sun Peaks changing their page markup (CI runs this daily)."""
+
+    def test_live_page_still_parses(self):
+        import requests
+        response = requests.get(SNOW_REPORT_URL, timeout=30)
+        response.raise_for_status()
+        data = parse_resort_html(response.content)
+        self.assertGreaterEqual(len(data["temperatures"]), 3, data)
+        for t in data["temperatures"]:
+            self.assertTrue(1000 <= t["elevation_m"] <= 2500, t)
+            self.assertTrue(-50 <= t["c"] <= 45, t)
+        if data["new_snow"]:
+            self.assertTrue(data["base"], "snow conditions without a snow base")
+
+
+class ForecastParseTests(TestCase):
+    def test_village_and_alpine_combined(self):
+        days = parse_forecast(open_meteo_payload())
+        self.assertEqual(len(days), 5)
+        first = days[0]
+        self.assertEqual(first["date"], datetime.date(2026, 1, 10))
+        self.assertEqual((first["icon"], first["label"]), ("fas fa-cloud", "Overcast"))
+        self.assertEqual((first["high_c"], first["low_c"]), (1.0, -6.0))
+        self.assertEqual((first["alpine_high_c"], first["alpine_snow_cm"]), (-7.0, 8.4))
+        self.assertEqual((first["sunrise"], first["sunset"]), ("07:45", "16:40"))
+
+    def test_unknown_weather_code(self):
+        payload = open_meteo_payload()
+        payload[0]["daily"]["weather_code"][0] = 1234
+        self.assertEqual(parse_forecast(payload)[0]["icon"], "fas fa-cloud")
+
+
+class BuildContextTests(TestCase):
+    def test_winter_when_snow_data_present(self):
+        ctx = build_context(fixture("weather_bad_data.html"), parse_forecast(open_meteo_payload()), "metric")
+        self.assertEqual(ctx["season"], "winter")
+        self.assertEqual(ctx["hero_icon"], "fas fa-cloud-sun")
+        self.assertEqual([b["value"] for b in ctx["base"]], [158, 172])
+
+    @patch("snow_report.views.date", fake_today(2026, 7, 15))
+    def test_summer_without_snow_data(self):
+        ctx = build_context(fixture("weather_current.html"), parse_forecast(open_meteo_payload()), "metric")
+        self.assertEqual(ctx["season"], "summer")
+        self.assertEqual(ctx["hero_text"], "Overcast")  # falls back to the forecast
+
+    @patch("snow_report.views.date", fake_today(2026, 11, 8))
+    def test_shoulder_season_without_snow_data(self):
+        ctx = build_context(fixture("weather_current.html"), None, "metric")
+        self.assertEqual(ctx["season"], "shoulder")
+
+    def test_imperial_conversion(self):
+        ctx = build_context(fixture("weather_bad_data.html"), parse_forecast(open_meteo_payload()), "imperial")
+        self.assertEqual(ctx["temperatures"][0]["value"], 28)            # -2 °C
+        self.assertEqual(ctx["temperatures"][0]["elevation"], "6,824")   # 2080 m
+        self.assertEqual([s["value"] for s in ctx["new_snow"]], [0, None, 0, 9.4])
+        self.assertEqual([b["value"] for b in ctx["base"]], [62, 68])
+        self.assertEqual(ctx["wind"][0]["value"], 7)                     # 11 km/h
+        self.assertEqual(ctx["forecast"][0]["snow"], 3.3)                # 8.4 cm
+
+    def test_wind_arrow_points_downwind(self):
+        ctx = build_context(fixture("weather_bad_data.html"), None, "metric")
+        self.assertEqual([(w["direction"], w["rotation"]) for w in ctx["wind"]][:2], [("S", 0.0), ("WSW", 67.5)])
+
+    def test_stations_ordered_top_down_and_spread_up_the_slope(self):
+        ctx = build_context(fixture("weather_current.html"), None, "metric")
+        self.assertEqual([t["name"] for t in ctx["temperatures"]][0], "Top of the World")
+        self.assertEqual([t["height_pct"] for t in ctx["temperatures"]], [88, 64, 40, 16])
+
+    def test_everything_unavailable(self):
+        ctx = build_context(None, None, "metric")
+        self.assertFalse(ctx["resort_ok"])
+        self.assertEqual(ctx["temperatures"], [])
+
+
+class ViewTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    @patch("snow_report.views.get_forecast", side_effect=lambda: parse_forecast(open_meteo_payload()))
+    @patch("snow_report.views.get_resort", side_effect=lambda: fixture("weather_bad_data.html"))
+    def test_winter_page(self, *_):
+        html = self.client.get("/snow_report/").content.decode()
+        self.assertIn("Mountain Conditions", html)
+        self.assertIn("Ski season", html)
+        self.assertIn("Snow base", html)
+        self.assertIn("5-day forecast", html)
+
+    @patch("snow_report.views.date", fake_today(2026, 7, 15))
+    @patch("snow_report.views.get_forecast", return_value=None)
+    @patch("snow_report.views.get_resort", side_effect=lambda: fixture("weather_current.html"))
+    def test_summer_page_hides_snow_and_missing_forecast(self, *_):
+        html = self.client.get("/snow_report/?units=imperial").content.decode()
+        self.assertIn("Summer", html)
+        self.assertIn("Air quality", html)
+        self.assertNotIn("Snow base", html)
+        self.assertNotIn("5-day forecast", html)
+        self.assertIn("6,824 ft", html)
+
+    @patch("snow_report.views.get_forecast", return_value=None)
+    @patch("snow_report.views.get_resort", return_value=None)
+    def test_sources_down(self, *_):
+        response = self.client.get("/snow_report/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Conditions are unavailable", response.content.decode())
+
+
+@tag("selenium")
 class SnowReportScrollHintTest(StaticLiveServerTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        from tests.selenium_helpers import get_chrome_options
         cls.browser = webdriver.Chrome(options=get_chrome_options())
-        cls.browser.set_window_size(1920, 1080)
+        cls.browser.set_window_size(1280, 700)
 
     @classmethod
     def tearDownClass(cls):
         cls.browser.quit()
         super().tearDownClass()
 
-    def test_scroll_hint_hides_at_bottom(self):
-        """Scroll hint should disappear when the user scrolls to the bottom."""
-        self.browser.get(f'{self.live_server_url}/snow_report/')
-
-        # Wait for scroll hint to be visible
-        scroll_hint = WebDriverWait(self.browser, 10).until(
-            EC.visibility_of_element_located((By.ID, 'scroll-hint'))
-        )
-        self.assertTrue(scroll_hint.is_displayed(), "Scroll hint should be visible initially")
-
-        # Scroll the sentinel element into view to trigger IntersectionObserver
-        self.browser.execute_script(
-            "document.getElementById('scroll-sentinel').scrollIntoView();"
-        )
-
-        # Wait for the 'hidden' class to appear on the scroll hint
+    @patch("snow_report.views.get_forecast", side_effect=lambda: parse_forecast(open_meteo_payload()))
+    @patch("snow_report.views.get_resort", side_effect=lambda: fixture("weather_bad_data.html"))
+    def test_scroll_hint_hides_at_bottom(self, *_):
+        self.browser.get(f"{self.live_server_url}/snow_report/")
+        hint = WebDriverWait(self.browser, 10).until(EC.visibility_of_element_located((By.ID, "scroll-hint")))
+        self.assertNotIn("hidden", hint.get_attribute("class"))
+        self.browser.execute_script("document.getElementById('scroll-sentinel').scrollIntoView();")
         WebDriverWait(self.browser, 5).until(
-            lambda driver: 'hidden' in driver.find_element(By.ID, 'scroll-hint').get_attribute('class'),
-            "Scroll hint should have 'hidden' class after scrolling to bottom"
+            lambda d: "hidden" in d.find_element(By.ID, "scroll-hint").get_attribute("class"),
+            "Scroll hint should have 'hidden' class after scrolling to bottom",
         )
+
 
 class HomepageHookTests(TestCase):
     def setUp(self):
-        from django.core.cache import cache
         cache.clear()
 
-    @patch("snow_report.homepage.fetch_weather_html", return_value=b"")
-    @patch("snow_report.homepage.parse_weather_html")
-    def test_status_uses_first_snow_amount(self, mock_parse, _fetch):
-        mock_parse.return_value = {"today_description": "Sunny", "snow_conditions": [
-            {"period": "New Snow", "value": "N/A"}, {"period": "24 Hr", "value": "14"},
-        ]}
-        from snow_report.homepage import status
-        result = status()
-        self.assertEqual((result.text, result.level), ("14 cm in 24 hr", "on"))
+    def status(self, resort):
+        with patch("snow_report.homepage.get_resort", return_value=resort):
+            from snow_report.homepage import status
+            return status()
+
+    def test_new_snow(self):
+        resort = fixture("weather_bad_data.html")
+        resort["new_snow"][0]["cm"] = 14.0
+        result = self.status(resort)
+        self.assertEqual((result.text, result.level), ("14 cm new snow", "on"))
+
+    def test_skips_missing_snow_values(self):
+        resort = fixture("weather_bad_data.html")
+        resort["new_snow"] = [{"period": "New Snow", "cm": None}, {"period": "24 Hr", "cm": 3.0}]
+        self.assertEqual(self.status(resort).text, "3 cm in 24 hr")
+
+    def test_off_season_shows_alpine_temperature(self):
+        result = self.status(fixture("weather_current.html"))
+        self.assertEqual((result.text, result.level), ("4 °C at Top of the World", "info"))
+
+    def test_unavailable(self):
+        self.assertIsNone(self.status(None))
