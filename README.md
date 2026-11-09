@@ -17,6 +17,15 @@ Page: `/snow_report/` (`?units=metric|imperial`).
 - **Open-Meteo** (`forecast.py`, cached 30 min, no API key): the 5-day
   forecast for the village (1,255 m) and the alpine (2,080 m).
 
+## Today card background
+
+The Today card has a subtle animated background (clouds, sun, stars, fog,
+drizzle, rain, snow or storm). It follows the village's current weather code
+from Open-Meteo, falling back to today's forecast code (day or night from
+sunrise and sunset). Preview any effect with `?wx=<effect>`, e.g.
+`/snow_report/?wx=snow`. The animation stops when the device asks for
+reduced motion.
+
 ## Seasons
 
 - **Ski season:** Sun Peaks is publishing snow data. Shows snowfall, snow

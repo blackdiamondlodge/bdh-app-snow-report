@@ -10,9 +10,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from snow_report.forecast import parse_forecast
+from snow_report.forecast import get_current, get_forecast, parse_forecast, weather_effect
 from snow_report.resort import SNOW_REPORT_URL, parse_resort_html, sanitize_number
-from snow_report.views import build_context
+from snow_report.views import RESORT_TZ, build_context
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "tests")
 
@@ -39,12 +39,8 @@ def open_meteo_payload(days=5):
     return [daily(1.0, -6.0, 0.0, 3), daily(-7.0, -12.0, 8.4, 73)]
 
 
-def fake_today(year, month, day):
-    class FakeDate(datetime.date):
-        @classmethod
-        def today(cls):
-            return datetime.date(year, month, day)
-    return FakeDate
+def fake_now(year, month, day, hour=12):
+    return lambda: datetime.datetime(year, month, day, hour, tzinfo=RESORT_TZ)
 
 
 class SanitizeNumberTests(TestCase):
@@ -145,6 +141,26 @@ class ForecastParseTests(TestCase):
         self.assertEqual(parse_forecast(payload)[0]["icon"], "fas fa-cloud")
 
 
+class WeatherEffectTests(TestCase):
+    def test_codes(self):
+        cases = {(0, True): "sun", (1, False): "stars", (2, True): "partly", (2, False): "clouds",
+                 (3, True): "clouds", (45, True): "fog", (53, True): "drizzle", (63, True): "rain",
+                 (81, True): "rain", (73, True): "snow", (86, True): "snow", (95, True): "storm",
+                 (1234, True): "clouds"}
+        for (code, is_day), effect in cases.items():
+            self.assertEqual(weather_effect(code, is_day), effect, code)
+
+    @patch("snow_report.forecast.requests.get")
+    def test_fetch_caches_current_conditions(self, get):
+        cache.clear()
+        payload = open_meteo_payload()
+        payload[0]["current"] = {"time": "2026-01-10T20:00", "weather_code": 71, "is_day": 0}
+        get.return_value.json.return_value = payload
+        get_forecast()
+        self.assertEqual(get_current(), {"code": 71, "is_day": False})
+        self.assertIn("weather_code,is_day", get.call_args.kwargs["params"]["current"])
+
+
 class BuildContextTests(TestCase):
     def test_winter_when_snow_data_present(self):
         ctx = build_context(fixture("weather_bad_data.html"), parse_forecast(open_meteo_payload()), "metric")
@@ -152,13 +168,13 @@ class BuildContextTests(TestCase):
         self.assertEqual(ctx["hero_icon"], "fas fa-cloud-sun")
         self.assertEqual([b["value"] for b in ctx["base"]], [158, 172])
 
-    @patch("snow_report.views.date", fake_today(2026, 7, 15))
+    @patch("snow_report.views.local_now", fake_now(2026, 7, 15))
     def test_summer_without_snow_data(self):
         ctx = build_context(fixture("weather_current.html"), parse_forecast(open_meteo_payload()), "metric")
         self.assertEqual(ctx["season"], "summer")
         self.assertEqual(ctx["hero_text"], "Overcast")  # falls back to the forecast
 
-    @patch("snow_report.views.date", fake_today(2026, 11, 8))
+    @patch("snow_report.views.local_now", fake_now(2026, 11, 8))
     def test_shoulder_season_without_snow_data(self):
         ctx = build_context(fixture("weather_current.html"), None, "metric")
         self.assertEqual(ctx["season"], "shoulder")
@@ -181,6 +197,30 @@ class BuildContextTests(TestCase):
         self.assertEqual([t["name"] for t in ctx["temperatures"]][0], "Top of the World")
         self.assertEqual([t["height_pct"] for t in ctx["temperatures"]], [88, 64, 40, 16])
 
+    @patch("snow_report.views.local_now", fake_now(2026, 1, 10, hour=20))
+    def test_today_is_the_resort_date_not_utc(self):
+        ctx = build_context(None, parse_forecast(open_meteo_payload()), "metric")
+        self.assertEqual([d["name"] for d in ctx["forecast"][:2]], ["Today", "Sun"])
+
+    @patch("snow_report.views.local_now", fake_now(2026, 1, 11, hour=1))
+    def test_forecast_cached_before_midnight_starts_at_today(self):
+        ctx = build_context(None, parse_forecast(open_meteo_payload()), "metric")
+        self.assertEqual(ctx["today"]["date"], "Jan 11")
+        self.assertEqual(ctx["forecast"][0]["name"], "Today")
+
+    @patch("snow_report.views.local_now", fake_now(2026, 1, 10))
+    def test_background_follows_current_conditions(self):
+        forecast = parse_forecast(open_meteo_payload())
+        self.assertEqual(build_context(None, forecast, "metric", {"code": 75, "is_day": True})["wx"], "snow")
+        self.assertEqual(build_context(None, forecast, "metric")["wx"], "clouds")  # daily code 3
+        self.assertIsNone(build_context(None, None, "metric")["wx"])
+
+    @patch("snow_report.views.local_now", fake_now(2026, 1, 10, hour=22))
+    def test_background_falls_back_to_night_after_sunset(self):
+        payload = open_meteo_payload()
+        payload[0]["daily"]["weather_code"][0] = 0
+        self.assertEqual(build_context(None, parse_forecast(payload), "metric")["wx"], "stars")
+
     def test_everything_unavailable(self):
         ctx = build_context(None, None, "metric")
         self.assertFalse(ctx["resort_ok"])
@@ -200,7 +240,7 @@ class ViewTests(TestCase):
         self.assertIn("Snow base", html)
         self.assertIn("5-day forecast", html)
 
-    @patch("snow_report.views.date", fake_today(2026, 7, 15))
+    @patch("snow_report.views.local_now", fake_now(2026, 7, 15))
     @patch("snow_report.views.get_forecast", return_value=None)
     @patch("snow_report.views.get_resort", side_effect=lambda: fixture("weather_current.html"))
     def test_summer_page_hides_snow_and_missing_forecast(self, *_):
@@ -210,6 +250,14 @@ class ViewTests(TestCase):
         self.assertNotIn("Snow base", html)
         self.assertNotIn("5-day forecast", html)
         self.assertIn("6,824 ft", html)
+
+    @patch("snow_report.views.get_current", return_value={"code": 3, "is_day": True})
+    @patch("snow_report.views.get_forecast", return_value=None)
+    @patch("snow_report.views.get_resort", side_effect=lambda: fixture("weather_bad_data.html"))
+    def test_weather_background_and_preview_override(self, *_):
+        self.assertIn('data-wx="clouds"', self.client.get("/snow_report/").content.decode())
+        self.assertIn('data-wx="snow"', self.client.get("/snow_report/?wx=snow").content.decode())
+        self.assertIn('data-wx="clouds"', self.client.get("/snow_report/?wx=<b>").content.decode())
 
     @patch("snow_report.views.get_forecast", return_value=None)
     @patch("snow_report.views.get_resort", return_value=None)
