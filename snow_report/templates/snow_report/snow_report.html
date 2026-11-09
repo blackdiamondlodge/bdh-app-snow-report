@@ -28,13 +28,8 @@
     background: radial-gradient(ellipse 120% 80% at 50% 0%, #1f4a4a 0%, #0d1f22 55%, #060c0e 100%) fixed;
   }
   .mc-stage { position: relative; z-index: 1; max-width: 1500px; margin: 0 auto; padding: 1.5rem 1.25rem 7rem; }
-  .mc-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
-  .mc-brand { display: flex; align-items: center; gap: .9rem; }
-  .mc-brand img { width: 56px; height: auto; }
-  .mc-brand-name { letter-spacing: .28em; font-weight: 600; font-size: 1.1rem; }
-  .mc-brand-sub { letter-spacing: .35em; font-size: .7rem; opacity: .55; margin-top: .15rem; }
-  .mc-title { font-weight: 300; letter-spacing: .06em; font-size: clamp(1.6rem, 3.2vw, 2.4rem); margin: 0; text-align: right; }
-  .mc-season { display: inline-block; margin-top: .3rem; padding: .15rem .7rem; border-radius: 999px; font-size: .8rem;
+  .mc-card h2.mc-today { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .mc-season { display: inline-block; padding: .15rem .7rem; border-radius: 999px; font-size: .75rem;
                letter-spacing: .12em; text-transform: uppercase; background: rgba(255,255,255,.1); color: var(--accent); }
 
   .mc-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(12, 1fr); }
@@ -126,24 +121,12 @@
 
 {% block content %}
 <div class="mc-stage">
-  <header class="mc-header">
-    <div class="mc-brand">
-      <img src="{% static 'snow_report/brand/bdl-monogram-light.svg' %}" alt="">
-      <div>
-        <div class="mc-brand-name">BLACK DIAMOND LODGE</div>
-        <div class="mc-brand-sub">SUN PEAKS · BC</div>
-      </div>
-    </div>
-    <div>
-      <h1 class="mc-title">Mountain Conditions</h1>
-      {% if resort_ok %}<div style="text-align:right"><span class="mc-season">{% if season == 'winter' %}<i class="fas fa-snowflake"></i> Ski season{% elif season == 'summer' %}<i class="fas fa-sun"></i> Summer{% else %}<i class="fas fa-leaf"></i> Off-season{% endif %}</span></div>{% endif %}
-    </div>
-  </header>
+  <h1 class="visually-hidden">Mountain Conditions</h1>
 
   <div id="conditions" class="mc-grid">
     {% if hero_text or temperatures %}
     <section class="mc-card span-7">
-      <h2><i class="fas fa-mountain"></i>Today</h2>
+      <h2 class="mc-today"><span><i class="fas fa-mountain"></i>Today</span>{% if resort_ok %}<span class="mc-season">{% if season == 'winter' %}<i class="fas fa-snowflake"></i> Ski season{% elif season == 'summer' %}<i class="fas fa-sun"></i> Summer{% else %}<i class="fas fa-leaf"></i> Off-season{% endif %}</span>{% endif %}</h2>
       <div class="mc-hero">
         <i class="{{ hero_icon }} mc-hero-icon" aria-hidden="true"></i>
         <div>
