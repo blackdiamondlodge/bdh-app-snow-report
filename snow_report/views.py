@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from django.shortcuts import render
 
-from .forecast import EFFECTS, get_current, get_forecast, weather_effect
+from .forecast import EFFECTS, describe, get_current, get_forecast, weather_effect
 from .resort import get_resort, sanitize_number  # noqa: F401  (re-exported for older callers)
 
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
@@ -115,8 +115,14 @@ def build_context(resort, forecast, units, current=None):
         })
 
     today = days[0] if days else None
-    hero_icon = resort.get("icon") or (today["icon"] if today else "fas fa-mountain")
-    hero_text = resort.get("narrative") or (today["label"] if today else None)
+    if resort.get("narrative"):  # the resort's daily report wins (ski season)
+        hero_icon = resort.get("icon") or (today["icon"] if today else "fas fa-mountain")
+        hero_text = resort["narrative"]
+    elif current:  # otherwise what it's doing right now, matching the background
+        hero_icon, hero_text = describe(current["code"], current["is_day"])
+    else:
+        hero_icon = resort.get("icon") or (today["icon"] if today else "fas fa-mountain")
+        hero_text = today["label"] if today else None
 
     if current:
         wx = weather_effect(current["code"], current["is_day"])

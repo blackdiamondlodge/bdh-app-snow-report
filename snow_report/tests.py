@@ -216,6 +216,15 @@ class BuildContextTests(TestCase):
         self.assertIsNone(build_context(None, None, "metric")["wx"])
 
     @patch("snow_report.views.local_now", fake_now(2026, 1, 10, hour=22))
+    def test_hero_shows_current_conditions_without_a_resort_report(self):
+        forecast = parse_forecast(open_meteo_payload())  # daily code 3: Overcast
+        ctx = build_context(fixture("weather_current.html"), forecast, "metric", {"code": 0, "is_day": False})
+        self.assertEqual((ctx["hero_icon"], ctx["hero_text"]), ("fas fa-moon", "Clear"))
+        self.assertEqual(ctx["forecast"][0]["label"], "Overcast")  # the day summary stays in the forecast
+        ctx = build_context(fixture("weather_bad_data.html"), forecast, "metric", {"code": 0, "is_day": False})
+        self.assertTrue(ctx["hero_text"].startswith("Cloudy with sunny breaks"))  # resort report wins
+
+    @patch("snow_report.views.local_now", fake_now(2026, 1, 10, hour=22))
     def test_background_falls_back_to_night_after_sunset(self):
         payload = open_meteo_payload()
         payload[0]["daily"]["weather_code"][0] = 0

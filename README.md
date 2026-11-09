@@ -26,6 +26,10 @@ sunrise and sunset). Preview any effect with `?wx=<effect>`, e.g.
 `/snow_report/?wx=snow`. The animation stops when the device asks for
 reduced motion.
 
+Without a resort report (off-season), the Today card's icon and text also
+show current conditions, so they match the background. The whole-day summary
+stays in the forecast's Today tile.
+
 ## Seasons
 
 - **Ski season:** Sun Peaks is publishing snow data. Shows snowfall, snow
