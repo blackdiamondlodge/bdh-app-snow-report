@@ -1,12 +1,19 @@
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from django.shortcuts import render
 
-from .forecast import get_forecast
+from .forecast import EFFECTS, get_current, get_forecast, weather_effect
 from .resort import get_resort, sanitize_number  # noqa: F401  (re-exported for older callers)
 
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 AQHI_LEVELS = ((3, "low", "Low risk"), (6, "moderate", "Moderate"), (10, "high", "High risk"))
+RESORT_TZ = ZoneInfo("America/Vancouver")
+
+
+def local_now():
+    """Wall-clock time at the resort (the server runs in UTC)."""
+    return datetime.now(RESORT_TZ)
 
 
 class Units:
@@ -56,12 +63,13 @@ def _wind_rotation(direction):
     return (COMPASS.index(direction.upper()) * 22.5 + 180) % 360
 
 
-def build_context(resort, forecast, units):
+def build_context(resort, forecast, units, current=None):
     u = Units(units)
     resort = resort or {}
+    now = local_now()
     if resort.get("new_snow") or resort.get("base"):
         season = "winter"
-    elif 6 <= date.today().month <= 9:
+    elif 6 <= now.month <= 9:
         season = "summer"
     else:
         season = "shoulder"
@@ -89,10 +97,14 @@ def build_context(resort, forecast, units):
         air_quality.append({"name": a["name"], "elevation": u.h(a["elevation_m"]),
                             "value": round(a["aqhi"]), "level": level, "label": label})
 
+    forecast = forecast or []
+    if any(day["date"] == now.date() for day in forecast):
+        forecast = [day for day in forecast if day["date"] >= now.date()]  # cached from before midnight
     days = []
-    for day in forecast or []:
+    for day in forecast:
         days.append({
-            "name": "Today" if day["date"] == date.today() else day["date"].strftime("%a"),
+            "code": day.get("code"),
+            "name": "Today" if day["date"] == now.date() else day["date"].strftime("%a"),
             "date": f"{day['date']:%b} {day['date'].day}",
             "icon": day["icon"], "label": day["label"],
             "high": u.t(day["high_c"]), "low": u.t(day["low_c"]),
@@ -106,12 +118,21 @@ def build_context(resort, forecast, units):
     hero_icon = resort.get("icon") or (today["icon"] if today else "fas fa-mountain")
     hero_text = resort.get("narrative") or (today["label"] if today else None)
 
+    if current:
+        wx = weather_effect(current["code"], current["is_day"])
+    elif today and today["code"] is not None:
+        is_day = today["sunrise"] <= now.strftime("%H:%M") < today["sunset"]
+        wx = weather_effect(today["code"], is_day)
+    else:
+        wx = None
+
     return {
         "units": u.system,
         "u": u,
         "season": season,
         "hero_icon": hero_icon,
         "hero_text": hero_text,
+        "wx": wx,
         "updated": resort.get("updated"),
         "today": today,
         "temperatures": temperatures,
@@ -126,5 +147,7 @@ def build_context(resort, forecast, units):
 
 def snow_report(request):
     units = request.GET.get("units", "metric")
-    context = build_context(get_resort(), get_forecast(), units)
+    context = build_context(get_resort(), get_forecast(), units, get_current())
+    if request.GET.get("wx") in EFFECTS:  # preview a background
+        context["wx"] = request.GET["wx"]
     return render(request, "snow_report/snow_report.html", context)
