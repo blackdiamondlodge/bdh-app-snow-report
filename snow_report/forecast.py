@@ -75,8 +75,12 @@ def weather_effect(code, is_day=True):
     return "clouds"
 
 
-def describe(code):
-    return WMO.get(code, ("fas fa-cloud", "—"))
+NIGHT_ICONS = {"fas fa-sun": "fas fa-moon", "fas fa-cloud-sun": "fas fa-cloud-moon", "fas fa-cloud-sun-rain": "fas fa-cloud-moon-rain"}
+
+
+def describe(code, is_day=True):
+    icon, label = WMO.get(code, ("fas fa-cloud", "—"))
+    return (icon if is_day else NIGHT_ICONS.get(icon, icon)), label
 
 
 def parse_forecast(payload):
