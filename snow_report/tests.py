@@ -248,6 +248,9 @@ class ViewTests(TestCase):
         self.assertIn("Ski season", html)
         self.assertIn("Snow base", html)
         self.assertIn("5-day forecast", html)
+        # The units switch shows metric selected and flips to imperial.
+        self.assertIn('class="mc-units" data-unit="metric"', html)
+        self.assertIn('href="?units=imperial"', html)
 
     @patch("snow_report.views.local_now", fake_now(2026, 7, 15))
     @patch("snow_report.views.get_forecast", return_value=None)
@@ -259,6 +262,8 @@ class ViewTests(TestCase):
         self.assertNotIn("Snow base", html)
         self.assertNotIn("5-day forecast", html)
         self.assertIn("6,824 ft", html)
+        self.assertIn('class="mc-units" data-unit="imperial"', html)
+        self.assertIn('href="?units=metric"', html)
 
     @patch("snow_report.views.get_current", return_value={"code": 3, "is_day": True})
     @patch("snow_report.views.get_forecast", return_value=None)
