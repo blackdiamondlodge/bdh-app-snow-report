@@ -7,12 +7,11 @@
 
 {% block navbar_extras %}
 <div class="navbar-extras">
-  <button class="navbar-toggle-btn{% if units == 'metric' %} active{% endif %}"
-          onclick="window.location.href='?units=metric'"
-          {% if units == 'metric' %}disabled{% endif %}>°C, m</button>
-  <button class="navbar-toggle-btn{% if units == 'imperial' %} active{% endif %}"
-          onclick="window.location.href='?units=imperial'"
-          {% if units == 'imperial' %}disabled{% endif %}>°F, ft</button>
+  <a class="mc-units" data-unit="{{ units }}"
+     href="?units={% if units == 'imperial' %}metric{% else %}imperial{% endif %}"
+     aria-label="Switch between metric and imperial units">
+    <span class="u-metric">°C · m</span><span class="u-imperial">°F · ft</span>
+  </a>
 </div>
 {% endblock %}
 
@@ -27,6 +26,13 @@
     --accent: #ffc36b;
     background: radial-gradient(ellipse 120% 80% at 50% 0%, #1f4a4a 0%, #0d1f22 55%, #060c0e 100%) fixed;
   }
+  /* Same switch as the homepage's °C/°F. */
+  .mc-units { display: inline-flex; padding: 3px; border-radius: 999px; text-decoration: none;
+              background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+  .mc-units span { color: #8fa3bd; font-weight: 600; font-size: 14px; padding: 6px 13px;
+                   border-radius: 999px; white-space: nowrap; }
+  .mc-units[data-unit="metric"] .u-metric,
+  .mc-units[data-unit="imperial"] .u-imperial { background: var(--accent); color: #0c1622; }
   .mc-stage { position: relative; z-index: 1; max-width: 1500px; margin: 0 auto; padding: 1.5rem 1.25rem 7rem; }
   .mc-card h2.mc-today { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   .mc-season { display: inline-block; padding: .15rem .7rem; border-radius: 999px; font-size: .75rem;
