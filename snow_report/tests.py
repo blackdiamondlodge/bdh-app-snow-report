@@ -334,3 +334,37 @@ class HomepageHookTests(TestCase):
 
     def test_unavailable(self):
         self.assertIsNone(self.status(None))
+
+class ProvidesTests(TestCase):
+    NOW = datetime.datetime(2026, 1, 10, 12, tzinfo=RESORT_TZ)
+
+    def stats(self, resort, forecast=None):
+        from snow_report.provides import build_stats
+        return {s.key: s for s in build_stats(resort, forecast, self.NOW)}
+
+    def test_winter(self):
+        stats = self.stats(fixture("weather_bad_data.html"), parse_forecast(open_meteo_payload()))
+        self.assertEqual({k: s.value for k, s in stats.items() if s.value}, {
+            "temp_top": "\u22122°C", "temp_mid": "0°C", "temp_village": "3°C",
+            "snow_48h": "0 cm", "base": "158 cm",
+            "wind_top": stats["wind_top"].value,
+        })
+        self.assertNotIn("snow_24h", stats)  # "24 Hr" is missing in this capture
+        self.assertEqual(stats["sunset"].time, datetime.datetime(2026, 1, 10, 16, 40, tzinfo=RESORT_TZ))
+        # This morning's sunrise has passed: the next one is tomorrow's.
+        self.assertEqual(stats["sunrise"].time, datetime.datetime(2026, 1, 11, 7, 45, tzinfo=RESORT_TZ))
+
+    def test_off_season(self):
+        stats = self.stats(fixture("weather_current.html"))
+        self.assertEqual(stats["wind_top"].value, "16 km/h SSE")
+        self.assertFalse({"snow_24h", "snow_48h", "base", "sunrise"} & set(stats))
+
+    def test_declared_keys_cover_provided(self):
+        from snow_report.plugin import STAT_KEYS, spec
+        declared = {k for k, _ in STAT_KEYS}
+        stats = self.stats(fixture("weather_bad_data.html"), parse_forecast(open_meteo_payload()))
+        self.assertLessEqual(set(stats), declared)
+        self.assertEqual(spec.provides, {"stats": "snow_report.provides.stats"})
+
+    def test_unavailable(self):
+        self.assertEqual(self.stats(None), {})
