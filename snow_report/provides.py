@@ -65,8 +65,12 @@ def build_stats(resort, forecast, now):
     wind = _top([w for w in resort.get("wind") or [] if w.get("kph") is not None])
     if wind:
         add("wind_top", "Wind up top", 30, value=f"{wind['kph']:g} km/h {wind.get('direction') or ''}".strip())
-    add("sunrise", "Sunrise", 40, when=_sun(forecast, "sunrise", now))
-    add("sunset", "Sunset", 41, when=_sun(forecast, "sunset", now))
+    rise, sset = _sun(forecast, "sunrise", now), _sun(forecast, "sunset", now)
+    add("sunrise", "Sunrise", 40, when=rise)
+    add("sunset", "Sunset", 41, when=sset)
+    nxt = min([(t, label) for t, label in ((rise, "Sunrise"), (sset, "Sunset")) if t], default=None)
+    if nxt:
+        add("sun", nxt[1], 42, when=nxt[0])
     return out
 
 
