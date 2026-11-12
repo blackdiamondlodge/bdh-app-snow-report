@@ -11,6 +11,7 @@ STAT_KEYS = (
     ("wind_top", "Wind up top"),
     ("sunrise", "Sunrise"),
     ("sunset", "Sunset"),
+    ("sun", "Next sunrise or sunset"),
 )
 
 spec = PluginSpec(

@@ -353,6 +353,14 @@ class ProvidesTests(TestCase):
         self.assertEqual(stats["sunset"].time, datetime.datetime(2026, 1, 10, 16, 40, tzinfo=RESORT_TZ))
         # This morning's sunrise has passed: the next one is tomorrow's.
         self.assertEqual(stats["sunrise"].time, datetime.datetime(2026, 1, 11, 7, 45, tzinfo=RESORT_TZ))
+        self.assertEqual((stats["sun"].label, stats["sun"].time), ("Sunset", stats["sunset"].time))
+
+    def test_next_sun_after_sunset_is_sunrise(self):
+        from snow_report.provides import build_stats
+        evening = datetime.datetime(2026, 1, 10, 20, tzinfo=RESORT_TZ)
+        stats = {s.key: s for s in build_stats({}, parse_forecast(open_meteo_payload()), evening)}
+        self.assertEqual((stats["sun"].label, stats["sun"].time),
+                         ("Sunrise", datetime.datetime(2026, 1, 11, 7, 45, tzinfo=RESORT_TZ)))
 
     def test_off_season(self):
         stats = self.stats(fixture("weather_current.html"))
