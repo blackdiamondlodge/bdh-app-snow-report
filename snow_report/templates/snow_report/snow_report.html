@@ -153,12 +153,8 @@
 
   .mc-mountains { position: fixed; left: 0; right: 0; bottom: 0; width: 100%; height: 20vh; z-index: 0; pointer-events: none; }
 
-  .scroll-hint { position: fixed; bottom: 0; left: 0; width: 100%; height: 80px; background: linear-gradient(transparent, #060a10);
-                 display: flex; justify-content: center; align-items: flex-end; padding-bottom: 10px; pointer-events: none;
-                 z-index: 10; transition: opacity .4s ease; }
-  .scroll-hint.hidden { opacity: 0; }
-  .scroll-hint i { color: rgba(255,255,255,.6); font-size: 24px; animation: mc-bounce 1.5s infinite; }
-  @keyframes mc-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  /* The hub's shared scroll hint (base.html) adds the bouncing chevron. */
+  body { --hub-scroll-hint-bg: #060a10; }
 </style>
 {% endblock %}
 
@@ -301,7 +297,6 @@
   </div>
 
   <p class="mc-source">Sun Peaks Resort conditions · forecast by Open-Meteo</p>
-  <div id="scroll-sentinel" style="height: 1px;"></div>
 </div>
 
 <svg class="mc-mountains" viewBox="0 0 1200 200" preserveAspectRatio="none" aria-hidden="true">
@@ -309,15 +304,8 @@
   <path d="M0 200 L0 150 L150 105 L260 145 L390 95 L520 150 L660 110 L800 160 L930 120 L1060 155 L1200 125 L1200 200 Z" fill="#fff" fill-opacity=".06"/>
 </svg>
 
-<div class="scroll-hint" id="scroll-hint"><i class="fas fa-chevron-down"></i></div>
-
 <script>
   (function () {
-    var hint = document.getElementById('scroll-hint');
-    new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) { hint.classList.toggle('hidden', e.isIntersecting); });
-    }, { threshold: 0 }).observe(document.getElementById('scroll-sentinel'));
-
     // Today-card weather: a few layers per effect, randomised so it never looks tiled.
     var LAYERS = {
       sun: ['rays', 'sun'], stars: ['stars'], partly: ['rays', 'sun', 'clouds:2'], clouds: ['clouds:4'],
