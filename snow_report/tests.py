@@ -6,8 +6,6 @@ from django.core.cache import cache
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import TestCase, tag
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from snow_report.forecast import get_current, get_forecast, parse_forecast, weather_effect
@@ -298,13 +296,16 @@ class SnowReportScrollHintTest(StaticLiveServerTestCase):
     @patch("snow_report.views.get_forecast", side_effect=lambda: parse_forecast(open_meteo_payload()))
     @patch("snow_report.views.get_resort", side_effect=lambda: fixture("weather_bad_data.html"))
     def test_scroll_hint_hides_at_bottom(self, *_):
+        # The chevron comes from the hub's shared scroll hint (base.html).
         self.browser.get(f"{self.live_server_url}/snow_report/")
-        hint = WebDriverWait(self.browser, 10).until(EC.visibility_of_element_located((By.ID, "scroll-hint")))
-        self.assertNotIn("hidden", hint.get_attribute("class"))
-        self.browser.execute_script("document.getElementById('scroll-sentinel').scrollIntoView();")
+        WebDriverWait(self.browser, 10).until(
+            lambda d: d.execute_script("return !!document.querySelector('.hub-scroll-hint.on')"),
+            "Scroll hint should show while there is more to scroll",
+        )
+        self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight); document.body.scrollTop = document.body.scrollHeight;")
         WebDriverWait(self.browser, 5).until(
-            lambda d: "hidden" in d.find_element(By.ID, "scroll-hint").get_attribute("class"),
-            "Scroll hint should have 'hidden' class after scrolling to bottom",
+            lambda d: d.execute_script("return !document.querySelector('.hub-scroll-hint.on')"),
+            "Scroll hint should hide after scrolling to bottom",
         )
 
 
